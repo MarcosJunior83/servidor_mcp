@@ -1,0 +1,207 @@
+"""
+Servidor MCP FitTrack
+---------------------
+Registra e consulta treinos de musculação usando o Model Context Protocol (MCP).
+Comunicação: stdio. Armazenamento: arquivo treinos.json.
+
+ATENÇÃO: em servidores stdio, NUNCA use print() para depuração.
+A saída padrão (stdout) é o canal do protocolo MCP; qualquer print
+corromperia a comunicação com o cliente.
+"""
+
+import json
+import math
+from datetime import date
+from pathlib import Path
+
+from mcp.server.fastmcp import FastMCP
+
+# 1. Criação do servidor com o nome FitTrack
+mcp = FastMCP("FitTrack")
+
+# Caminho do JSON sempre ao lado deste arquivo (independe de onde o comando é executado)
+ARQUIVO_TREINOS = Path(__file__).parent / "treinos.json"
+
+
+# ----------------------------------------------------------------------
+# Funções auxiliares (não são ferramentas MCP)
+# ----------------------------------------------------------------------
+def salvar_dados(dados: dict) -> None:
+    """Grava o dicionário no treinos.json, formatado e com acentos preservados."""
+    try:
+        with open(ARQUIVO_TREINOS, "w", encoding="utf-8") as arquivo:
+            json.dump(dados, arquivo, ensure_ascii=False, indent=2)
+    except OSError as erro:
+        raise RuntimeError(f"Não foi possível gravar o arquivo de treinos: {erro}")
+
+
+def carregar_dados() -> dict:
+    """Lê o treinos.json. Se não existir, cria com a estrutura inicial."""
+    if not ARQUIVO_TREINOS.exists():
+        salvar_dados({"treinos": []})
+
+    try:
+        with open(ARQUIVO_TREINOS, "r", encoding="utf-8") as arquivo:
+            dados = json.load(arquivo)
+    except json.JSONDecodeError as erro:
+        raise RuntimeError(f"O arquivo treinos.json está inválido: {erro}")
+    except OSError as erro:
+        raise RuntimeError(f"Não foi possível ler o arquivo de treinos: {erro}")
+
+    if not isinstance(dados, dict) or not isinstance(dados.get("treinos"), list):
+        raise RuntimeError('Estrutura inválida em treinos.json. Esperado: {"treinos": []}')
+    return dados
+
+
+def normalizar(nome: str) -> str:
+    """Padroniza o nome para comparação (ignora maiúsculas e espaços nas pontas)."""
+    return nome.strip().casefold()
+
+
+def buscar_registros(dados: dict, nome_exercicio: str) -> list:
+    """Retorna os registros do exercício, ordenados por data (mantém a ordem de inserção no mesmo dia)."""
+    alvo = normalizar(nome_exercicio)
+    encontrados = [t for t in dados["treinos"] if normalizar(t["exercicio"]) == alvo]
+    return sorted(encontrados, key=lambda t: t["data"])  # sorted é estável
+
+
+def formatar_carga(valor: float) -> str:
+    """Formata a carga sem casas decimais desnecessárias (60.0 -> '60')."""
+    return f"{valor:g}"
+
+
+# ----------------------------------------------------------------------
+# Ferramentas MCP
+# ----------------------------------------------------------------------
+@mcp.tool()
+def listar_exercicios() -> str:
+    """Lista todos os exercícios que já possuem registros de treino."""
+    try:
+        dados = carregar_dados()
+    except RuntimeError as erro:
+        return f"Erro: {erro}"
+
+    nomes = {}
+    for treino in dados["treinos"]:
+        nomes.setdefault(normalizar(treino["exercicio"]), treino["exercicio"])
+
+    if not nomes:
+        return "Nenhum exercício registrado ainda."
+
+    lista = sorted(nomes.values(), key=str.casefold)
+    linhas = [f"- {nome}" for nome in lista]
+    return f"Exercícios registrados ({len(lista)}):\n" + "\n".join(linhas)
+
+
+@mcp.tool()
+def registrar_treino(nome_exercicio: str, carga: float, series: int, repeticoes: int) -> str:
+    """Registra um treino (a data de hoje é adicionada automaticamente).
+
+    Args:
+        nome_exercicio: nome do exercício (ex.: Supino Reto)
+        carga: carga utilizada em kg (maior que zero)
+        series: quantidade de séries (inteiro positivo)
+        repeticoes: quantidade de repetições (inteiro positivo)
+    """
+    nome = nome_exercicio.strip() if isinstance(nome_exercicio, str) else ""
+    if not nome:
+        return "Erro: o nome do exercício não pode estar vazio."
+    if isinstance(carga, bool) or not isinstance(carga, (int, float)) or not math.isfinite(carga) or carga <= 0:
+        return "Erro: a carga deve ser um número maior que zero."
+    if isinstance(series, bool) or not isinstance(series, int) or series <= 0:
+        return "Erro: as séries devem ser um número inteiro positivo."
+    if isinstance(repeticoes, bool) or not isinstance(repeticoes, int) or repeticoes <= 0:
+        return "Erro: as repetições devem ser um número inteiro positivo."
+
+    try:
+        dados = carregar_dados()
+        registro = {
+            "exercicio": nome,
+            "carga": float(carga),
+            "series": series,
+            "repeticoes": repeticoes,
+            "data": date.today().isoformat(),
+        }
+        dados["treinos"].append(registro)  # append preserva os registros anteriores
+        salvar_dados(dados)
+    except RuntimeError as erro:
+        return f"Erro: {erro}"
+
+    return (
+        f"Treino registrado: {nome} - {formatar_carga(carga)} kg, "
+        f"{series}x{repeticoes} em {registro['data']}."
+    )
+
+
+@mcp.tool()
+def consultar_historico(nome_exercicio: str) -> str:
+    """Retorna todos os registros de um exercício, organizados por data.
+
+    Args:
+        nome_exercicio: nome do exercício a consultar
+    """
+    if not isinstance(nome_exercicio, str) or not nome_exercicio.strip():
+        return "Erro: informe o nome do exercício."
+
+    try:
+        registros = buscar_registros(carregar_dados(), nome_exercicio)
+    except RuntimeError as erro:
+        return f"Erro: {erro}"
+
+    if not registros:
+        return f"Nenhum histórico encontrado para '{nome_exercicio.strip()}'."
+
+    linhas = [
+        f"{r['data']} | {formatar_carga(r['carga'])} kg | {r['series']} séries x {r['repeticoes']} repetições"
+        for r in registros
+    ]
+    return f"Histórico de {registros[0]['exercicio']} ({len(registros)} registros):\n" + "\n".join(linhas)
+
+
+@mcp.tool()
+def consultar_progressao(nome_exercicio: str) -> str:
+    """Compara a primeira e a última carga registrada de um exercício.
+
+    Args:
+        nome_exercicio: nome do exercício a consultar
+    """
+    if not isinstance(nome_exercicio, str) or not nome_exercicio.strip():
+        return "Erro: informe o nome do exercício."
+
+    try:
+        registros = buscar_registros(carregar_dados(), nome_exercicio)
+    except RuntimeError as erro:
+        return f"Erro: {erro}"
+
+    if len(registros) < 2:
+        return (
+            f"Registros insuficientes para '{nome_exercicio.strip()}': "
+            f"são necessários pelo menos 2 treinos para calcular a progressão "
+            f"(encontrados: {len(registros)})."
+        )
+
+    primeira = registros[0]["carga"]
+    ultima = registros[-1]["carga"]
+    diferenca = round(ultima - primeira, 2)
+
+    if diferenca > 0:
+        situacao = "AUMENTO de carga"
+    elif diferenca < 0:
+        situacao = "REDUÇÃO de carga"
+    else:
+        situacao = "MANUTENÇÃO da carga"
+
+    return (
+        f"Progressão de {registros[0]['exercicio']}:\n"
+        f"Primeira carga: {formatar_carga(primeira)} kg ({registros[0]['data']})\n"
+        f"Última carga: {formatar_carga(ultima)} kg ({registros[-1]['data']})\n"
+        f"Diferença: {diferenca:+g} kg\n"
+        f"Situação: {situacao}"
+    )
+
+
+# ----------------------------------------------------------------------
+# Inicialização
+# ----------------------------------------------------------------------
+if __name__ == "__main__":
+    mcp.run(transport="stdio")

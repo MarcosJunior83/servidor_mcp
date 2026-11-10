@@ -1,0 +1,90 @@
+"""
+Cliente MCP do FitTrack
+-----------------------
+Inicia o servidor_fittrack.py como subprocesso (stdio), descobre as ferramentas
+com list_tools() e as executa com call_tool(). Nenhuma ferramenta é chamada
+como função Python: tudo passa pelo protocolo MCP.
+"""
+
+import asyncio
+import sys
+from pathlib import Path
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+PASTA = Path(__file__).parent
+SERVIDOR = PASTA / "servidor_fittrack.py"
+
+
+def titulo(texto: str) -> None:
+    print("\n" + "=" * 60)
+    print(texto)
+    print("=" * 60)
+
+
+def extrair_texto(resultado) -> str:
+    """Junta o texto dos blocos de conteúdo retornados pelo servidor."""
+    partes = [bloco.text for bloco in resultado.content if hasattr(bloco, "text")]
+    texto = "\n".join(partes)
+    return f"[ERRO MCP] {texto}" if resultado.isError else texto
+
+
+async def chamar(session: ClientSession, nome: str, argumentos: dict) -> None:
+    print(f"\n>>> call_tool('{nome}', {argumentos})")
+    resultado = await session.call_tool(nome, argumentos)
+    print(extrair_texto(resultado))
+
+
+async def main() -> None:
+    # sys.executable = Python do ambiente virtual que está executando este cliente
+    parametros = StdioServerParameters(command=sys.executable, args=[str(SERVIDOR)])
+
+    async with stdio_client(parametros) as (leitura, escrita):
+        async with ClientSession(leitura, escrita) as session:
+            await session.initialize()
+            print("Conexão MCP estabelecida com o servidor FitTrack.")
+
+            # Descoberta das ferramentas
+            titulo("FERRAMENTAS DISPONÍVEIS (list_tools)")
+            resposta = await session.list_tools()
+            for ferramenta in resposta.tools:
+                print(f"\nNome: {ferramenta.name}")
+                print(f"Descrição: {(ferramenta.description or '').strip().splitlines()[0]}")
+                propriedades = ferramenta.inputSchema.get("properties", {})
+                obrigatorios = ferramenta.inputSchema.get("required", [])
+                if propriedades:
+                    print("Parâmetros:")
+                    for nome, info in propriedades.items():
+                        tipo = info.get("type", "?")
+                        marca = "obrigatório" if nome in obrigatorios else "opcional"
+                        print(f"  - {nome} ({tipo}, {marca})")
+                else:
+                    print("Parâmetros: nenhum")
+
+            # Testes demonstrativos
+            titulo("TESTE 1 - Listar exercícios")
+            await chamar(session, "listar_exercicios", {})
+
+            titulo("TESTE 2 - Registrar treinos")
+            await chamar(session, "registrar_treino",
+                         {"nome_exercicio": "Supino Reto", "carga": 60, "series": 4, "repeticoes": 10})
+            await chamar(session, "registrar_treino",
+                         {"nome_exercicio": "Supino Reto", "carga": 65, "series": 4, "repeticoes": 8})
+            print("\n(Validação) Tentativa com carga inválida:")
+            await chamar(session, "registrar_treino",
+                         {"nome_exercicio": "Supino Reto", "carga": 0, "series": 4, "repeticoes": 10})
+
+            titulo("TESTE 3 - Consultar histórico")
+            await chamar(session, "consultar_historico", {"nome_exercicio": "Supino Reto"})
+            await chamar(session, "consultar_historico", {"nome_exercicio": "Exercício Inexistente"})
+
+            titulo("TESTE 4 - Consultar progressão de carga")
+            await chamar(session, "consultar_progressao", {"nome_exercicio": "Supino Reto"})
+
+            titulo("TESTE 1 (repetido) - Listar exercícios após os registros")
+            await chamar(session, "listar_exercicios", {})
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

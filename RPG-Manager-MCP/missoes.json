@@ -1,0 +1,27 @@
+[
+    {
+        "nome": "O Goblin Desaparecido",
+        "descricao": "Investigar o desaparecimento de um viajante próximo à floresta.",
+        "status": "Pendente"
+    },
+    {
+        "nome": "A Torre Abandonada",
+        "descricao": "Explorar uma antiga torre e descobrir o que aconteceu com seus habitantes.",
+        "status": "Pendente"
+    },
+    {
+        "nome": "Proteção da Vila",
+        "descricao": "Ajudar os moradores a proteger a vila de uma ameaça.",
+        "status": "Concluída"
+    },
+    {
+        "nome": "O Segredo das Ruínas",
+        "descricao": "Investigar símbolos antigos encontrados nas ruínas.",
+        "status": "Concluída"
+    },
+    {
+        "nome": "Fase de Teste",
+        "descricao": "Explorar uma antiga masmorra. (de teste)",
+        "status": "Concluída"
+    }
+]

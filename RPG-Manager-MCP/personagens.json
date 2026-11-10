@@ -1,0 +1,32 @@
+[
+    {
+        "nome": "Thorin",
+        "raca": "Anão",
+        "classe": "Guerreiro",
+        "nivel": 5
+    },
+    {
+        "nome": "Elaria",
+        "raca": "Elfa",
+        "classe": "Maga",
+        "nivel": 4
+    },
+    {
+        "nome": "Kael",
+        "raca": "Humano",
+        "classe": "Ladino",
+        "nivel": 3
+    },
+    {
+        "nome": "Lyra",
+        "raca": "Meia-elfa",
+        "classe": "Clériga",
+        "nivel": 2
+    },
+    {
+        "nome": "ZenTeste",
+        "raca": "Humano",
+        "classe": "Paladino",
+        "nivel": 5
+    }
+]
